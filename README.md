@@ -1,7 +1,18 @@
 # Elixir Workshop Agenda
 
-
 ## List Functions
+
+* Initial **[start]**
+  * Explain `*.exs`
+  * Explain `ExUnit.start` with `pending`
+  * Explain `ExUnit.Case, async: true`
+  * Explain `assert X == Y`
+  * Explain `@spec`
+  * Make it green
+    * Explain KO `concat(ll), do: do_concat(ll, [])` with `do_concat(t, append(r, h))`
+    * Explain OK `concat(ll), do: do_concat(reverse(ll), [])` with `do_concat(t, append(h, r))`
+* Reduce **[reduce]**
+  * Implement all functions using reduce
 
 
 ## Robozzle(I)
