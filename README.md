@@ -17,8 +17,55 @@
 
 ## Robozzle(I)
 
-
-## Diamond Kata
+* Explain [Robozzle](http://robozzle.com)
+* Parse one line scenario **[one-line-scenario]**
+  * Explain types, tests and run `dly`
+* Parse multiple lines scenario **[multiple-lines-scenario]** **[CHALLENGE]**
+* Run move commands with `rc/3` **[move-commands]**
+* Pick stars with `rc/3` **[pick-stars]**
+* Run paint commands with `rc/3` **[paint-commands]** **[CHALLENGE]**
+  * Change command type definition
+* Run conditional commands with `rc/3` **[conditional-commands]**
+  * Change command type definition
+* Run multiple commands `run/3` **[run-commands]**
+  * Add `complete?/1`
+* Check for out of stage in `run/3` **[out-of-stage]** **[CHALLENGE]**
+* Run multiple functions `run/3` **[run-functions]**
+  * Show `functions` and `stack` types
+  * Show add `{:call, f}` to command type
+  * Show how tests are changed `run/3` and new test for call command
+  * Change the execution model, we stop to run when stack is empty
+    * Change type specification for `run/4` as `@spec run(functions, ship, stage, stack) :: {outcome, ship, stage}`
+    * Change type specification for `rc/3` add return option `{ship, stage, function_name}`
+  * Add the `{:call, f}` command
+* Check for stack overflow `run/3` **[stack-overflow]** **[CHALLENGE]**
+  * Show tests that already pass
+* Check for out of time `run/3` **[out-of-time]** **[CHALLENGE]**
+  * Add steps type and parameter to `run/3`
+* Extract `assert_scenario` **[assert-scenario]** **[CHALLENGE]**
+  * Parse the empty tile ".."
+* Create `scenario` macro **[scenario-macro]**
+  * Explain macros
+    * Functions executed at compile time
+    * Functions from AST to AST
+    * They are called until no macros are left to call
+    * `quote do if(cool), do: IO.puts("COOOL!") end`
+    * `Macro.to_string(v(7))`
+    * `Macro.expand(v(7), __ENV__)`
+    * `Macro.expand(v(7), __ENV__) |> Macro.to_string |> IO.puts`
+  * Create `Robozzle.AcceptanceTest.Macro`
+  * Require module in `Robozzle.AcceptanceTest`
+  * Define `defmacro scenario(outcome, args)` and inspect input
+  * It would be awful to describe what we want directly in AST, but we have our friend `quote` to help us
+  * Describe inside `quote do/end` what output do you want
+  * Refine `defmacro scenario(outcome, {:__block__, _, block}`
+  * Define `scenario_from(block)` as `Enum.find(&is_binary/1)` in block list
+  * Define `function_from(:f1, block)`
+  * Define `defmacro __using__(_opts) do` to import things
+  * Inside `__using__` add `Module.put_attribute __MODULE__, :acceptance_counter, 0`
+  * Inside quote use `Module.get_attribute(__MODULE, :acceptance_counter)`
+  * Support `scenario(outcome, title) do/end` **[CHALLENGE]**
+    * Call a macro from the other macro -> macro expands until there's no macro
 
 
 ## Parallel
