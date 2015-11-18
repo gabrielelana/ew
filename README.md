@@ -161,3 +161,52 @@
 
 
 ## Robozzle(II)
+* Application **[end-I]**
+  * Generate the application with `mix new ew-robozzle --sup --app robozzle` and look at the directories
+  * Create `Robozzle.Runner` and `Robozzle.Parser`
+  * Import all the tests
+* Runner server **[runner-server]** **[CHALLENGE]**
+  * `Robozzle.Server.run(pid, fs, ship, stage)`
+  * `Robozzle.Server.start_link(opts \\ [])` -> `GenServer.start_link(__MODULE__, :ok, opts)`
+  * Add worker `worker(Robozzle.Runner.Server, [[name: :runner]])`
+  * `iex -S mix` show `Application.started_applications`
+  * `Robozzle.Runner.Server.run(:runner, %{f1: [:forward]}, {{0,0}, :east}, %{{0,0} => :blue, {1,0} => {:blue, :star}})`
+  * Try it in a test with `setup` function. Why we don't need to stop the server? Why can we run all test in parallel?
+* Runner as interactive server **[interactive-server]** **[CHALLENGE]**
+  * Look at the tests in `test/robozzle_runner_server_test.exs`
+  * Implement `Robozzle.Runner.step` without changing `Robozzle.Runner.run`
+  * Implement `Robozzle.Runner.Server.load` with specs
+  * Implement `Robozzle.Runner.Server.step` with specs
+* Runners in pool **[poolboy]**
+  * Look at the test in `test/robozzle_test.exs`
+  * Add poolboy dependency `{:poolboy, github: "devinus/poolboy"}` `mix do deps.get, deps.compile`
+  * Configure poolboy in `lib/robozzle.ex`
+  * Start `Robozzle.Server` as worker in `lib/robozzle`
+  * `mix test` are still working, why?
+  * `:poolboy.transaction(:runners, &Runner.Server.run(&1, fs, ship, stage))`
+  * Add `Robozzle.run` application level function
+  * We have a problem: we have a pool but we are running one runner at the time
+* Use all runners in pool **[parallel-runners]** **[CHALLENGE]**
+  * We can block the client of `GenServer.call/2` keeping responsive the server with `{:noreply, state}` and the later use of `GenServer.reply/2`
+  * `spawn_link(fn -> :poolboy.transaction(...) end); {:noreply, state}`
+  * Demonstrate with `iex -S mix` and `import_file "priv/parallel_runners.exs"`. Add `:timer.sleep(500)` in `Robozzle.Runner.Server` in run handler
+* Solver **[solver]**
+  * `Robozzle.Server.solve(server, ship, stage) :: :busy | :timeout | {:solution, Runner.functions}`
+  * Add `:busy` return value for `Robozzle.Server.run` and `Robozzle.run`
+    * Reply with `:busy` when state is `%{solving: _}`, default is `%{}`
+  * Add `handle_call({:solve, …})`
+    * `Process.send_after(self, :timeout, 1_000 * 60 * 5)`
+    * `Robozzle.Drone.explore(scenario, [], constraints, ship, stage, self)`
+    * `{:noreply, %{solving: scenario, from: from}}`
+  * Add `Robozzle.Server.solved?(server, scenario)`
+  * Add `Robozzle.Server.report_solution(server, scenario, solution)`
+    * `GenServer.reply(from, {:solution, solution})`
+  * `Drone.explore`
+    * `spawn`
+    * Check if unfit for constraints -> return
+    * Check if already found a solution -> return
+    * Run in pool `:poolboy.transaction(:runners, &Runner.Server.run())`
+    * Handle outcome
+      * `:complete` -> `Server.report_solution`
+      * `:out_of_stage` -> `:ok`
+      * otherwise -> for each next solution -> explore
