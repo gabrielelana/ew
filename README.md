@@ -210,3 +210,4 @@
       * `:complete` -> `Server.report_solution`
       * `:out_of_stage` -> `:ok`
       * otherwise -> for each next solution -> explore
+* Single runner solver: run multiple solver in parallel until runners are available in pool **[CHALLENGE]**
