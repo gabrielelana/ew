@@ -70,36 +70,55 @@
 
 ## Parallel
 
-* Naked send and receive solution
+* Naked send and receive solution **[simple]**
   * Fibonacci implementation
-  * Explain `PID`, `self`, `spawn`, `spawn_link`, `send`, `receive` and mailboxes
   * `0..35 |> Enum.map(&Fibonacci.of/1) |> IO.inspect`
+  * We want to create a `Parallel.map` that uses all the cores we have
+  * Explain `PID`, `self`, `spawn`, `spawn_link`, `send`, `receive` and mailboxes in the shell
   * `0..35 |> Parallel.map(&Fibonacci.of/1) |> IO.inspect`
-* Task solution
+  * try with `:random.seed(:os.timestamp)` and `:random.uniform(25) + 10`
+* Task solution **[task]**
   * `&Task.async(fn -> f.(&1) end)` and `&Task.await/1`
   * Problems:
     * We wait for the results in order, a long task could block other, show with `Waste.ms`
     * It's not easy to force a global timeout, useful when you have a limited amount of time
     * It's an all or nothing solution, if a task crashes, the master crash and so the other tasks
-* Collect as soon as possible
+* Collect as soon as possible **[collect-asap]**
   * `Enum.map(&Task.async(fn -> f.(&1) end)) |> collect`, use `Task.find(tasks, message)`
   * Show what is `message`
   * Results are in reverse order, but maybe the initial order must be kept…
-* Collect as soon as possible keeping order **[CHALLENGE]**
+* Collect as soon as possible keeping order **[keep-order]** **[CHALLENGE]**
+  * Show with `IO.inspect` before and after `Parallel.map(&Waste.ms/1)` the order is different
   * Use `Enum.zip(1..Enum.count(enumerable))`, `Enum.sort_by(&elem(&1, 0))`
-* Handle timeout
-  * Send timeout message `Process.send_after(self, {:timeout, ref}, 2_000)`
-  * `try do collect` then `after :erlang.cancel_timer(timer)`
+* Handle timeout **[handle-timeout]**
+  * Send timeout message `Process.send_after(self, {:timeout, ref}, 2_000)` in `collect`
+  * Always cancel timer after `try do collect` then `after :erlang.cancel_timer(timer)`
   * Explain `receive` with `after 0` (`after` in try is different than `after` in receive)
   * Tag results `{:ok, results}` and `{:timeout, count, results}`
-  * Sort results with `sort` function
-  * Show timeout with `0..300 |> Enum.map(fn _ -> :random.uniform(35) end) |> Parallel.map(&Fibonacci.of/1)`
-  * Show timeout with `0..10 |> Enum.map(fn _ -> :random.uniform(2_000) end) |> Parallel.map(&Waste.ms/1, timeout: 1_000)`
+  * Add `timeout` as option to `Parallel.map`
+  * Show timeout with `0..10 |> Enum.map(fn _ -> :random.uniform(2_000) + 1_000 end) |> Parallel.map(&Waste.ms/1, timeout: 1_000)`
+* Handle failures **[handle-failures]**
+  * The simplest approach would be to `try/catch` around `f.(e)` in `Task.async` ignoring errors **[CHALLENGE]**
+    * Fail fast is good when you don't know what to do in case of error/failure, otherwise catch the error!
+    * Warning: `catch` doesn't catch exit signals, you don't know what it's going on inside `f`
+    * The task is linked to the master process, if the task crashes then the master is going to crash to
+    * We can trap exits but it's not a good idea to trap exits temporarily
+      * `iex> spawn_link fn -> raise "BOOOM!!!" end`
+      * `iex> Process.flag(:trap_exit, true)`
+      * `iex> spawn_link fn -> raise "BOOOM!!!" end`
+    * We can monitor the tasks
+  * Replace `Task.async` with `task` function that uses `spawn`
+    * `Enum.map(&task(&1, f))` returns reference and pid `pid = spawn(fn -> send(me, {reference, f.(e)}) end); {reference, pid}`
+    * In collect use `List.keytake(tasks, task_ref, 0) => {_, tasks}` in `receive {task_ref, result}`
+    * We are in the same condition as before
+  * Monitor PIDs in `Parallel.task` with `Process.monitor(pid)`
+  * Receive `{:DOWN, _, _, pid, _}` and remove with `List.keytake(tasks, pid, 1)`
 * Introduction to distributed Elixir
   * Nodes, names, cookies, `epmd`
   * `iex` -> `Node.alive?` is false
   * `iex --sname foo` -> `Node.alive?` is true (`sname` stands for short name)
   * We can also start with a full name `iex --name "foo@0.0.0.0"` if you want
+  * We can also start after with `:net_kernel.start([:foo, :shortnames])`
   * Nodes starts to know each other at the first ping `Node.ping(:"foo@apollo")`
   * List of nodes with `Node.list`
   * Nodes keep pinging each other, try to kill a node and it's gone `Node.list`
@@ -111,17 +130,13 @@
   * `Node.spawn(:"foo@apollo", :code, :load_binary, [:"Elixir.Fibonacci", 'fibonacci.erl', b])`
     * same as `:rpc.call("foo@apollo", :code, :load_binary, [:"Elixir.Fibonacci", 'fibonacci.erl', b])`
   * Run `Fibonacci.of(13)` in `foo@apollo`
-* Distributed solution
-  * Replace `&Task.async(fn)` with `&spread(&1, f)`, change `receive` in `collect/3`, we have the same thing as before
-  * Connect nodes `:net_kernel.start([:self, :shortnames])`, ping other nodes, show `[Node.self | Node.list]`
-  * Try to run code on a random node `nodes |> Enum.random |> Node.spawn_link` crashes because we don't have the code on the other node!
-  * `{:module, _, module, _} = defmodule XXX ...` and `:rpc.call(n, :code, :load_binary, [:"Elixir.ModuleName", 'module_name.erl', module])`
-  * Try to run code and it crashes again, explain difference between function compiled and evaluated, `{waste_ms, _} = Code.eval_string("fn(e) -> Waste.ms(e) end")`
-* Handle errors
-  * Back to `collect-asap`
-  * `spawn` not `spawn_link`
-  * Monitor PIDs and keep them with references
-  * Receive `{:DOWN, _, _, pid, _}` and remove with `List.keydelete`
+* Distributed solution **[distributed]**
+  * Connect nodes `:net_kernel.start([:self, :shortnames])`, ping other nodes `Node.ping(:"foo@apollo")`, show `[Node.self | Node.list]`
+  * Try to run code on a random node `[Node.self|Node.list] |> Enum.random |> Node.spawn` crashes because we don't have the code on the other node!
+  * Capture the binary code of the modules with `{:module, _, module, _} = defmodule XXX ...`
+  * Send the binary code to the other nodes `Node.list |> Node.map(fn(n) -> :rpc.call(n, :code, :load_binary, [:"Elixir.ModuleName", 'module_name.erl', module]) end)`
+  * Run the code and show in `task` the current node with `IO.inspect(Node.self)`
+  * Show that failure handling works transparently across nodes
 
 
 ## Echo Server
