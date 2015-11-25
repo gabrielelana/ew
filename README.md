@@ -139,36 +139,96 @@
   * Show that failure handling works transparently across nodes
 
 
-## Echo Server
-
-* Create an app skeleton and look into it `mix new echo` (`mix.exs`, `config/config.exs`, `test/test_helper.exs`, `test/echo_test.exs`)
+## Counter Server
+* Create an app skeleton `mix new counter` and look into it (`mix.exs`, `config/config.exs`, `test/test_helper.exs`, `test/counter_test.exs`)
 * Difference between: Application, Library and Project
   * Application: started and stopped as a unit and reused in other systems
   * Library: like applications but cannot be started and stopped
   * Project: structure of files organized in a way that `Mix` understands
-* `Echo` as `GenServer` to accept connections and echo back
-  * Socket is not active, `GenServer.cast(self, :accept)`
-* Run with `iex -S mix` and `Echo.start_link(4242)`, try with `netcat localhost 4242`, close the client and everything blow up
-* Handle closed socket
-* Run the server more gracefully
-  * Make it an application `Echo`, `Echo.Listener`, add `mod: {Echo, []}, env: [port: 4242]` to `application` in `mix.exs`
+* Create a process that starts with `n` and count down to `0` **[CHALLENGE]**
+* Turn it into a `GenServer` and why? (TODO: look into Cesarini book)
+* Turn it into an `Agent`
+
+
+## Echo Server
+* Create a `GenServer` `Echo` **[echo-server]**
+  * `Echo.start_link(port)`
+  * In `init/1` accept connections with `:gen_tcp.listen(port, options)` with options `[:binary, packet: :line, active: false, reuseaddr: true]`
+    * Socket is not active, so `{:ok, socket_server} -> GenServer.cast(self, :accept)` and reply with `{:ok, socket_server}`
+  * `handle_cast(:accept, status)`
+    * `{:ok, socket_client} = :gen_tcp.accept(socket_server)`
+    * `serve(socket_client)`
+    * after serve keep accepting with `GenServer.cast(self, :accept)`
+    * `{:noreply, socket_server}`
+  * `serve(socket_client)`
+    * `socket_client |> read_line |> echo_line |> serve`
+    * `read_line` -> `:gen_tcp.recv(socket_client, 0)`
+    * `echo_line` -> `:gen_tcp.send(socket_client, line)`
+  * Run with `iex -S mix` and `Echo.start_link(4242)`
+    * Try with `netcat localhost 4242`
+    * It works but when close the client and everything blow up, why?
+* Handle closed socket **[handle-closed-socket]** **[CHALLENGE]**
+  * Handle `{:error, _}` in `read_line` and `echo_line`
+  * Propagate `{:error, _}` in `echo_line`
+  * Reply with `:ok` in `serve` if `{:error, _}`
+* Make it an application **[application]**
+  * Show `iex> Application.started_applications`
+  * Add application module callback in `mix.exs`, add `mod: {Echo, []}` to `application`
+  * Add default port configuration in environment, add `env: [port: 4242]` to `application`
+  * Save `lib/echo.ex` in `lib/echo/server.ex`
+  * Turn `Echo` in an application
+    * `use Application`
+    * `def start(type, [])` -> `start(type, Application.get_env(:echo, :port)`
+    * `def start(_type, port)` -> `Echo.Server.start_link(port)`
+  * Start with `iex -S mix` or `mix run --no-halt`
   * Replace `IO.puts` with `Logger.info` after `require Logger`
-  * Start with `mix run --no-halt`
-* Handle more than one client at the time
-  * Extract `Echo.Server`, give socket client after `init/1` because you need to have the pid to give the socket ownership
+* Handle multiple clients **[multiple-clients]**
+  * Extract `Echo.Listener`
+    * `def serve(client_socket)`
+      * `{:ok, server} = Echo.Server.start_link`
+      * `:gen_tcp.controlling_process(client_socket, server)`
+      * `Echo.Server.meet(server, client_socket)`
+    * We can't give the socket at `start_link` because you need to have the pid to give the socket ownership
+  * Make `Echo.Server` work **[CHALLENGE]**
+    * `def init(_), do: {:ok, :waiting}`
+    * `handle_cast({:meet, socket_client}, :waiting)` -> `GenServer.cast(self, :serve)` and `{:noreply, socket_client}`
+    * `handle_cast(:serve, :waiting)` -> `socket_client |> read_line |> echo_line |> continue`
+    * `def continue({:error, reason}), do: {:stop, reason}`
+    * `def continue(socket_client)` -> `GenServer.cast(self, :serve)` and `{:noreply, socket_client}`
+  * Change `Echo.start_link` from `Echo.Server` to `Echo.Listener`
   * Start multiple clients, it works, but when you close one of them... Crash! Because the process are linked
-* Supervise them all
-  * Add `Echo.Supervisor` and `Echo.Server.Supervisor`, then app should start `Echo.Supervisor`
-* Release and update
-  * Handle timeout in `:gen_tcp.accept` and `:gen_tcp.recv`, implement `code_change/3`
-  * Add `{:exrm, "~> 0.19.9}` to the dependencies, then `mix do deps.get, compile`, look at the new release related tasks with `mix help`
+* Enter the supervisors **[supervisors]**
+  * Add `Echo.Supervisor`
+    * `def start_link(port)` -> `Supervisor.start_link(__MODULE__, port)`
+    * `def init(port)`
+      * `children = [worker(Echo.Listener, [port])]`
+      * `supervise(children, strategy: :one_for_one)`
+    * The application should start the supervisor `Echo.start` -> `Echo.Supervisor.start_link`
+    * Now it blows again but the server restarts!
+  * Add `Echo.Server.Supervisor`
+    * `def start_link(args, opts)` -> `Supervisor.start_link(__MODULE__, args, opts)`
+    * `def init(_)`
+      * `children = [worker(Echo.Server, [])]`
+      * `supervise(children, strategy: :simple_one_for_one)`
+    * Add `supervisor(Echo.Server.Supervisor, [[], [name: Echo.Server.Supervisor])` in `Echo.Supervisor` children
+    * Start child in listener `Supervisor.start_child(Echo.Server.Supervisor, [])`
+  * Start multiple clients, when you close one you still see a bad log
+  * When the socket close then it's normal to stop the server
+    * In `Echo.Server.continue` handle `{:error, :closed, s}` -> `{:stop, :normal, s}`
+* Release and update **[release]**
+  * There's a problem, right now, both `Echo.Server` and `Echo.Listener` are blocking on `accept` and `recv`, they can't handle a release upgrade!!!
+    * In `Echo.Listener` use `:gen_tcp.accept(ss, 500)` when `{:error, :timeout}` -> `GenServer.cast(self, :accept)`
+    * In `Echo.Server` use `:gen_tcp.recv(sc, 0, 500)` when `{:error, :timeout}` -> `{:timeout, sc}`
+      * `Echo.Server.echo_line` handle `{:timeout, socket_client}` -> `socket_client`
+  * Add `{:exrm, "~> 0.19.9"}` to the dependencies, then `mix do deps.get, compile`, look at the new release related tasks with `mix help`
   * Package `env MIX_ENV=prod mix release`
   * Look at `rel/echo` directory
   * Deploy `mkdir ~/tmp/echo`, `cp rel/echo/releases/0.0.1/echo.tar.gz ~/tmp/echo`, `cd ~/tmp/echo`, `tar -xzvf echo.tar.gz`
   * Start `bin/echo start`
   * Attach `bin/echo attach` (`CTRL-D` to detach)
   * Leave a `netcat` session open
-  * Echo back in uppercase and increment the version number
+  * Change `Echo.Server.echo_line` put line in `String.upcase(line)`
+    * Bump the version number to `0.0.2`
     * Create release `env MIX_ENV=prod mix release`
     * Deploy `mkdir ~/tmp/echo/releases/0.0.2`, `cp rel/echo/releases/0.0.2/echo.tar.gz ~/tmp/echo/releases/0.0.2`
     * Upgrade `bin/echo upgrade "0.0.2"`, client is still alive and now it's uppercase
