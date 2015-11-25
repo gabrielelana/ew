@@ -145,8 +145,18 @@
   * Application: started and stopped as a unit and reused in other systems
   * Library: like applications but cannot be started and stopped
   * Project: structure of files organized in a way that `Mix` understands
-* Create a process that starts with `n` and count down to `0` **[CHALLENGE]**
-* Turn it into a `GenServer` and why? (TODO: look into Cesarini book)
+* Create a process that starts with `n` and count down to `0`
+* Create a process that implements a key/value store **[CHALLENGE]**
+* What could go wrong? What are the problems?
+  * Use ref to ensure uniqueness of the request
+  * Server may die after message sent
+  * Server name is not registered
+  * Timeout to avoid deadlocks
+* Turn it into a `GenServer`
+  * Show `:sys.trace(:counter, true)` and `:sys.trace(:counter, false)`
+  * Show `:sys.statistics(:counter, true)`, `:sys.statistics(:counter, :get)` and `:sys.statistics(:counter, false)`
+  * Show `:sys.get_status(:counter)`
+  * Show `:sys.get_state(:counter)`
 * Turn it into an `Agent`
 
 
